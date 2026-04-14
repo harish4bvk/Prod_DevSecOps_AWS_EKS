@@ -1,0 +1,11 @@
+frontend:
+  image: your-dockerhub/frontend:latest
+  replicas: 1
+
+backend:
+  image: your-dockerhub/backend:latest
+  replicas: 1
+
+service:
+  frontendPort: 80
+  backendPort: 5000

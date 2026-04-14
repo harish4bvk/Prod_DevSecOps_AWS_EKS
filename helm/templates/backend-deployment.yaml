@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: {{ .Values.backend.image }}
+          ports:
+            - containerPort: 5000
+          env:
+            - name: DB_HOST
+              value: "<RDS-ENDPOINT>"
+            - name: DB_USER
+              value: "admin"
+            - name: DB_PASS
+              value: "password"
+            - name: DB_NAME
+              value: "appdb"

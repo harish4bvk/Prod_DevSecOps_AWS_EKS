@@ -1,0 +1,4 @@
+apiVersion: v2
+name: 3tier-app
+description: DevSecOps 3-tier app
+version: 0.1.0
