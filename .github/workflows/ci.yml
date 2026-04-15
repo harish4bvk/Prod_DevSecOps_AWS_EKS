@@ -1,157 +1,115 @@
-# ==============================================================
-# DevSecOps CI/CD Pipeline
-# ==============================================================
-# Triggers on every push and pull request.
-# Stages: Build → Unit Test → SAST (SonarQube) → SCA (Black Duck) → Docker Build → Image Scan (Trivy) → Push to ECR
-# ==============================================================
-
-name: DevSecOps CI Pipeline
+name: CI DevSecOps Pipeline
 
 on:
   push:
-    branches: [ main ]
-
-env:
-  AWS_REGION: ap-south-1
-  ECR_REPOSITORY_BACKEND: backend
-  ECR_REPOSITORY_FRONTEND: frontend
-  CLUSTER_NAME: devsecops-cluster
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
-  ci:
+  build-test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # -------------------------
-      # Build
-      # -------------------------
-      - name: Build frontend
-        working-directory: ./app/frontend
-        run: |
-         npm install
-         npm run build
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Build backend
-        working-directory: ./app/backend
-        run: |
-          npm install
-          npm run build
+      - name: Install dependencies
+        working-directory: ./app
+        run: npm install
 
-      # -------------------------
-      # Unit Tests
-      # -------------------------
-      - name: Unit Test
+      - name: Run unit tests
+        working-directory: ./app
         run: npm test
 
-      # -------------------------
-      # SonarQube Scan
-      # -------------------------
-      - name: Sonar Scan
-        run: |
-          sonar-scanner \
-            -Dsonar.projectKey=your-project \
-            -Dsonar.host.url=${{ secrets.SONAR_HOST }} \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
-
-      # -------------------------
-      # Quality Gate (FAIL pipeline)
-      # -------------------------
-      - name: Sonar Quality Gate
-        run: |
-          sleep 20
-          STATUS=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
-          "${{ secrets.SONAR_HOST }}/api/qualitygates/project_status?projectKey=your-project" | jq -r .projectStatus.status)
-
-          if [ "$STATUS" != "OK" ]; then
-            echo "Quality Gate Failed"
-            exit 1
-          fi
-
-      # -------------------------
-      # Black Duck Scan
-      # -------------------------
-      - name: Black Duck Scan
-        run: |
-           npm audit --audit-level=high || true
-           # For a real Black Duck scan, you would run the Detect script:
-      #    bash <(curl -s https://detect.synopsys.com/detect.sh) \
-      #    --blackduck.url=${{ secrets.BLACKDUCK_URL }} \
-      #    --blackduck.api.token=${{ secrets.BLACKDUCK_TOKEN }} \
-      #    --detect.policy.check.fail.on.severities=CRITICAL,HIGH
-
-      # -------------------------
-      # Configure AWS
-      # -------------------------
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
+  sonar:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
-          aws-region: ap-south-1
+          projectBaseDir: ./app
+          args: >
+            -Dsonar.projectKey=prod-devsecops
+            -Dsonar.qualitygate.wait=true
 
-      # -------------------------
-      # Login to ECR
-      # -------------------------
+  blackduck:
+    runs-on: ubuntu-latest
+    needs: sonar
+    steps:
+      - uses: actions/checkout@v4
+      - name: Black Duck Scan
+        uses: synopsys-sig/github-action@v1
+        with:
+          blackduck_url: ${{ secrets.BLACKDUCK_URL }}
+          blackduck_token: ${{ secrets.BLACKDUCK_TOKEN }}
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: blackduck
+    env:
+      AWS_REGION: ap-south-1
+      CLUSTER_NAME: devsecops-cluster
+      ECR_REPOSITORY_BACKEND: backend
+      ECR_REPOSITORY_FRONTEND: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Login to ECR
+        run: aws ecr get-login-password --region $AWS_REGION | \
+             docker login --username AWS --password-stdin \
+             ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
+
+      - name: Build backend image
         run: |
-          aws ecr get-login-password --region $AWS_REGION \
-          | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+          docker build -t $ECR_REPOSITORY_BACKEND:latest ./docker/backend
+          docker tag $ECR_REPOSITORY_BACKEND:latest \
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_BACKEND:latest
 
-      # -------------------------
-      # Docker Build
-      # -------------------------
-      - name: Build Docker Backend
+      - name: Build frontend image
         run: |
-          docker build -t backend:${{ github.sha }} ./backend
+          docker build -t $ECR_REPOSITORY_FRONTEND:latest ./docker/frontend
+          docker tag $ECR_REPOSITORY_FRONTEND:latest \
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_FRONTEND:latest
 
-          docker tag backend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/backend:${{ github.sha }}
-      
-      - name: Build Docker Frontend
-        run: |
-          docker build -t frontend:${{ github.sha }} ./frontend
-
-          docker tag frontend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/frontend:${{ github.sha }}
-
-      # -------------------------
-      # Trivy Scan (FAIL if vuln)
-      # -------------------------
-      - name: Trivy Scan backend Image
+      - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: backend:${{ github.sha }}
+          image-ref: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_BACKEND:latest
+          severity: HIGH,CRITICAL
           exit-code: 1
-          severity: CRITICAL,HIGH
 
-      - name: Trivy Scan frontend Image
-        uses: aquasecurity/trivy-action@master  
+      - name: Push images
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_BACKEND:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_FRONTEND:latest
+
+  gitops-update:
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - name: Checkout GitOps repo
+        uses: actions/checkout@v4
         with:
-          image-ref: frontend:${{ github.sha }}
-          exit-code: 1
-          severity: CRITICAL,HIGH
+          repository: harish4bvk/gitops-repo
+          token: ${{ secrets.GITOPS_TOKEN }}
 
-      # -------------------------
-      # Push Image
-      # -------------------------
-      - name: Push Image backend
+      - name: Update Helm values
         run: |
-          docker tag backend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/backend:${{ github.sha }}
-          docker push ${{ secrets.ECR_REGISTRY }}/backend:${{ github.sha }}
-    
-      - name: Push Image frontend
-        run: |
-          docker tag frontend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/frontend:${{ github.sha }}
-          docker push ${{ secrets.ECR_REGISTRY }}/frontend:${{ github.sha }}
-      
-      # -------------------------
-      # Update GitOps Repo
-      # -------------------------
-      - name: Update Manifest
-        run: |
-          sed -i "s|image:.*|image: ${{ secrets.ECR_REGISTRY }}/$ECR_REPOSITORY_BACKEND:${{ github.sha }}|" k8s/deployment.yaml
+          sed -i "s/tag:.*/tag: latest/" helm/3tier-app/values.yaml
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git commit -am "Update image tag"
-          git push origin main
+          git commit -am "Update image tags"
+          git push
