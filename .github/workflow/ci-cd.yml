@@ -1,0 +1,84 @@
+name: DevSecOps CI/CD Pipeline
+
+on:
+push:
+branches:
+- main
+
+env:
+AWS_REGION: ap-south-1
+ECR_REPOSITORY_BACKEND: backend
+ECR_REPOSITORY_FRONTEND: frontend
+CLUSTER_NAME: devsecops-cluster
+
+jobs:
+build-and-deploy:
+runs-on: ubuntu-latest
+
+```
+permissions:
+  id-token: write
+  contents: read
+
+steps:
+  - name: Checkout code
+    uses: actions/checkout@v3
+
+  - name: Configure AWS credentials (OIDC)
+    uses: aws-actions/configure-aws-credentials@v4
+    with:
+      role-to-assume: <YOUR-GITHUB-IAM-ROLE-ARN>
+      aws-region: ${{ env.AWS_REGION }}
+
+  - name: Login to ECR
+    run: |
+      aws ecr get-login-password --region $AWS_REGION | \
+      docker login --username AWS --password-stdin \
+      $(aws sts get-caller-identity --query Account --output text).dkr.ecr.$AWS_REGION.amazonaws.com
+
+  - name: Build Backend Image
+    run: |
+      docker build -t backend -f docker/backend/Dockerfile .
+
+  - name: Build Frontend Image
+    run: |
+      docker build -t frontend -f docker/frontend/Dockerfile .
+
+  - name: Scan Backend Image (Trivy)
+    uses: aquasecurity/trivy-action@master
+    with:
+      image-ref: backend
+      severity: CRITICAL,HIGH
+      exit-code: 1
+
+  - name: Scan Frontend Image (Trivy)
+    uses: aquasecurity/trivy-action@master
+    with:
+      image-ref: frontend
+      severity: CRITICAL,HIGH
+      exit-code: 1
+
+  - name: Tag Images
+    run: |
+      ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+      docker tag backend:latest $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/backend:latest
+      docker tag frontend:latest $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/frontend:latest
+
+  - name: Push Images to ECR
+    run: |
+      ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+      docker push $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/backend:latest
+      docker push $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/frontend:latest
+
+  - name: Update kubeconfig
+    run: |
+      aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+
+  - name: Deploy to EKS using Helm
+    run: |
+      helm upgrade --install app helm/3tier-app \
+        --set backend.image=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$AWS_REGION.amazonaws.com/backend:latest \
+        --set frontend.image=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$AWS_REGION.amazonaws.com/frontend:latest
+```
