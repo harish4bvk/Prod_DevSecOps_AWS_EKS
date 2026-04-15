@@ -100,34 +100,49 @@ jobs:
         run: |
           docker build -t backend:${{ github.sha }} ./backend
 
+          docker tag backend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/backend:${{ github.sha }}
+      
       - name: Build Docker Frontend
         run: |
           docker build -t frontend:${{ github.sha }} ./frontend
 
+          docker tag frontend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/frontend:${{ github.sha }}
+
       # -------------------------
       # Trivy Scan (FAIL if vuln)
       # -------------------------
-      - name: Trivy Scan
+      - name: Trivy Scan backend Image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: $ECR_REPO:${{ github.sha }}
+          image-ref: backend:${{ github.sha }}
+          exit-code: 1
+          severity: CRITICAL,HIGH
+
+      - name: Trivy Scan frontend Image
+        uses: aquasecurity/trivy-action@master  
+        with:
+          image-ref: frontend:${{ github.sha }}
           exit-code: 1
           severity: CRITICAL,HIGH
 
       # -------------------------
       # Push Image
       # -------------------------
-      - name: Push Image
+      - name: Push Image backend
         run: |
-          docker tag $ECR_REPO:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/$ECR_REPO:${{ github.sha }}
-          docker push ${{ secrets.ECR_REGISTRY }}/$ECR_REPO:${{ github.sha }}
-
+          docker tag backend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/backend:${{ github.sha }}
+          docker push ${{ secrets.ECR_REGISTRY }}/backend:${{ github.sha }}
+      - name: Push Image frontend
+        run: |
+          docker tag frontend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/frontend:${{ github.sha }}
+          docker push ${{ secrets.ECR_REGISTRY }}/frontend:${{ github.sha }}
+      
       # -------------------------
       # Update GitOps Repo
       # -------------------------
       - name: Update Manifest
         run: |
-          sed -i "s|image:.*|image: ${{ secrets.ECR_REGISTRY }}/$ECR_REPO:${{ github.sha }}|" k8s/deployment.yaml
+          sed -i "s|image:.*|image: ${{ secrets.ECR_REGISTRY }}/$ECR_REPOSITORY_BACKEND:${{ github.sha }}|" k8s/deployment.yaml
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git commit -am "Update image tag"
