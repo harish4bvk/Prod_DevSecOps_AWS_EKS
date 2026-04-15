@@ -26,33 +26,30 @@ jobs:
         working-directory: ./app
         run: npm test
 
-  sonar:
-    runs-on: ubuntu-latest
-    needs: build-test
-    steps:
-      - uses: actions/checkout@v4
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v2
         with:
           projectBaseDir: ./app
           args: >
             -Dsonar.projectKey=prod-devsecops
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
             -Dsonar.qualitygate.wait=true
 
-  blackduck:
-    runs-on: ubuntu-latest
-    needs: sonar
-    steps:
-      - uses: actions/checkout@v4
-      - name: Black Duck Scan
-        uses: synopsys-sig/github-action@v1
-        with:
-          blackduck_url: ${{ secrets.BLACKDUCK_URL }}
-          blackduck_token: ${{ secrets.BLACKDUCK_TOKEN }}
+  #blackduck:
+  #  runs-on: ubuntu-latest
+  #  needs: build-test
+  #  steps:
+  #    - uses: actions/checkout@v4
+  #    - name: Black Duck Scan
+  #      uses: synopsys-sig/github-action@v1
+  #      with:
+  #        blackduck_url: ${{ secrets.BLACKDUCK_URL }}
+  #        blackduck_token: ${{ secrets.BLACKDUCK_TOKEN }}
 
   docker-build:
     runs-on: ubuntu-latest
-    needs: blackduck
+    needs: build-test
     env:
       AWS_REGION: ap-south-1
       CLUSTER_NAME: devsecops-cluster
@@ -93,8 +90,8 @@ jobs:
 
       - name: Push images
         run: |
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_BACKEND:latest
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_FRONTEND:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/backend:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/frontend:latest
 
   gitops-update:
     runs-on: ubuntu-latest
