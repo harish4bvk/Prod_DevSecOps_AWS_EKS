@@ -69,6 +69,7 @@ Client → Ingress → Frontend → Backend → RDS (PostgreSQL)
 ### Continuous Integration (CI)
 
 * Triggered on code push
+* Unit Test
 * Builds Docker images for frontend & backend
 * Scans images using **Trivy**
 * Pushes images to AWS ECR

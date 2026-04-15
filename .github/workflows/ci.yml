@@ -132,6 +132,7 @@ jobs:
         run: |
           docker tag backend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/backend:${{ github.sha }}
           docker push ${{ secrets.ECR_REGISTRY }}/backend:${{ github.sha }}
+    
       - name: Push Image frontend
         run: |
           docker tag frontend:${{ github.sha }} ${{ secrets.ECR_REGISTRY }}/frontend:${{ github.sha }}
