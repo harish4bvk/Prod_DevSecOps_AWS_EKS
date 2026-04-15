@@ -6,10 +6,10 @@ branches:
 - main
 
 env:
-AWS_REGION: ap-south-1
-ECR_REPOSITORY_BACKEND: backend
-ECR_REPOSITORY_FRONTEND: frontend
-CLUSTER_NAME: devsecops-cluster
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY_BACKEND: backend
+  ECR_REPOSITORY_FRONTEND: frontend
+  CLUSTER_NAME: devsecops-cluster
 
 jobs:
 build-and-deploy:
