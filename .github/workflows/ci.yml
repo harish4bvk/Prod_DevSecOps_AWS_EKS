@@ -18,12 +18,20 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Install dependencies
-        working-directory: ./app
+      - name: Install dependencies for frontend
+        working-directory: ./app/frontend
+        run: npm install
+      
+      - name: Install dependencies for backend
+        working-directory: ./app/backend
         run: npm install
 
-      - name: Run unit tests
-        working-directory: ./app
+      - name: Run unit tests for frontend
+        working-directory: ./app/frontend
+        run: npm test
+
+      - name: Run unit tests for backend
+        working-directory: ./app/backend
         run: npm test
 
       - name: SonarQube Scan
