@@ -34,10 +34,10 @@ jobs:
         working-directory: ./app/backend
         run: npm test
 
-      - name: SonarQube Scan
+      - name: SonarQube Scan for frontend
         uses: sonarsource/sonarqube-scan-action@v2
         with:
-          projectBaseDir: ./app
+          projectBaseDir: ./app/frontend
           args: >
             -Dsonar.projectKey=prod-devsecops
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
@@ -48,8 +48,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-test
     steps:
-      - name: Run npm audit
-        working-directory: ./app
+      - name: Run npm audit for frontend
+        working-directory: ./app/frontend
+        run: npm audit
+
+      - name: Run npm audit for backend
+        working-directory: ./app/backend
         run: npm audit
   #    - uses: actions/checkout@v4
   #    - name: Black Duck Scan
